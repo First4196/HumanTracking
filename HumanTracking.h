@@ -8,10 +8,13 @@ bool use_velocity = false;
 bool use_particles_average = true;
 bool merge_opposite_angle = true;
 
-double dummy_point_likelihood = 0.1f;
 double human_a = 0.1f;
 double human_b = 0.2f;
-double observation_likelihoood_sd = 0.1f;
+
+bool use_beam_model = true;
+double dummy_point_likelihood = 0.1f;
+double beam_likelihood_sd = 0.1f;
+double point_likelihood_sd = 0.1f;
 
 double min_x = -4.0f;
 double max_x = 4.0f;
@@ -147,7 +150,7 @@ public:
 		n_particles = new_n_particles;
 		particles = new_particles;
 	}
-	double guassian_likelihood(State state, Point2d point) {
+	double beam_likelihood(State state, Point2d point) {
 		Point2d center = Point2d(state.x, state.y);
 		Point2d pointT = point - center;
 		Point2d originT = -center;
@@ -164,22 +167,38 @@ public:
 		}
 		if (intersections.size() == 1) {
 			double dist = norm(point) - norm(intersections[0]);
-			return guassian_pdf(dist, 0, observation_likelihoood_sd);
+			return guassian_pdf(dist, 0, beam_likelihood_sd);
 		}
 		else if(intersections.size() == 2){
 			double dist = norm(point) - min(norm(intersections[0]), norm(intersections[1]));
-			return guassian_pdf(dist, 0, observation_likelihoood_sd);
+			return guassian_pdf(dist, 0, beam_likelihood_sd);
 		}
 		else {
 			return -1.0f;
 		}
+	}
+	double point_likelihood(State state, Point2d point) {
+		// point ellipse distance is hard, use origin-point intersection with ellipse instead
+		Point2d center = Point2d(state.x, state.y);
+		Point2d pointT = point - center;
+		Point2d pointTR = rotate_around_origin(pointT, -state.angle);
+		vector<Point2d> intersectionsTR = ellipse_ray_intersection(human_a, human_b, Point2d(0.0f, 0.0f), pointTR);
+		assert(intersectionsTR.size() == 1);
+		double dist = norm(pointTR) - norm(intersectionsTR[0]);
+		return guassian_pdf(dist, 0, point_likelihood_sd);
 	}
 	void correction(const vector<Point2d>& points) {
 		for (int i = 0; i < n_particles; i++) {
 			int n_valid_points = 0;
 			double logscore = log(dummy_point_likelihood);
 			for (int j = 0; j < points.size(); j++) {
-				double likelihood = guassian_likelihood(particles[i].state, points[j]);
+				double likelihood;
+				if (use_beam_model) {
+					likelihood = beam_likelihood(particles[i].state, points[j]);
+				}
+				else {
+					likelihood = point_likelihood(particles[i].state, points[j]);
+				}
 				if (likelihood >= 0) {
 					n_valid_points++;
 					logscore += log(likelihood);
